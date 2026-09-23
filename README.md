@@ -146,3 +146,7 @@ See [AGENTS.md](AGENTS.md) for conventions (it's also `CLAUDE.md`).
 ```sh
 uv run pytest            # hardware-free: the USB boundary is faked in tests/fakes.py
 ```
+
+## License
+
+[MIT](LICENSE)
