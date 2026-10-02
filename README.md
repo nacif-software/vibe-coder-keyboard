@@ -1,4 +1,4 @@
-# vibecoder-keyboard-CH57x
+# vibe-coder-keyboard
 
 A macOS command-line tool (`macropad`) for programming the cheap **6-key + 1-knob RGB USB
 macropads** sold on AliExpress. It replaces the vendor's Windows-only app, and it's designed to be
@@ -47,8 +47,8 @@ with libusb, not through the keyboard APIs that require Input Monitoring).
 Requires macOS, Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-git clone https://github.com/Ricardonacif/vibecoder-keyboard-CH57x
-cd vibecoder-keyboard-CH57x
+git clone https://github.com/nacif-software/vibe-coder-keyboard
+cd vibe-coder-keyboard
 uv tool install --editable .      # puts `macropad` on your PATH
 ```
 

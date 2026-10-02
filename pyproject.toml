@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Ricardonacif/vibecoder-keyboard-CH57x"
+Homepage = "https://github.com/nacif-software/vibe-coder-keyboard"
 
 [project.scripts]
 macropad = "macropad.cli:main"
