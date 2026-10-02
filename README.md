@@ -36,10 +36,11 @@ macOS Shortcuts.
 
 ## Status
 
-This tool was written **before the hardware arrived**. The USB protocol was decoded from the
-vendor app, cross-checked against ch57x-keyboard-tool, and covered by 85 tests that simulate the
-USB device. It hasn't been run against a physical pad yet. [docs/protocol.md](docs/protocol.md)
-ends with the checklist of things still to verify on hardware.
+**Working on real hardware.** The USB protocol was decoded from the vendor app before the pad
+arrived, then confirmed on the device: combos, 5-step sequences, mouse, media keys and the knob
+all behave as documented. No macOS permissions are needed (the tool talks to the pad over raw USB
+with libusb, not through the keyboard APIs that require Input Monitoring).
+[docs/protocol.md](docs/protocol.md) lists what's verified and the few things still untested.
 
 ## Install
 
@@ -69,7 +70,7 @@ macropad apply           # restore your layout afterwards (once you have one)
 | `macropad led 0\|1\|2` | Backlight: off / last-pressed key lit / rainbow wave |
 | `macropad show [--layer N]` | Print the recorded mapping of every slot |
 | `macropad names` | Every valid slot, modifier, key, media and mouse name |
-| `macropad status` | Connection check and HID interfaces |
+| `macropad status` | Connection check, USB interfaces, and the config endpoint |
 | `macropad identify` | Temporarily map key1–6 → `1`–`6`, knob left/press/right → `7`/`8`/`9` (layer 1) |
 
 Every command accepts `--json` (output on stdout, errors included), and every write command

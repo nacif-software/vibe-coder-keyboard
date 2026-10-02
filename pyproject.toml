@@ -7,7 +7,8 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
-    "hidapi>=0.14",
+    "libusb-package>=1.0",
+    "pyusb>=1.2",
     "pyyaml>=6",
 ]
 

@@ -1,14 +1,19 @@
-"""Talk to the macropad over USB HID via hidapi (native IOHIDManager on macOS).
+"""Talk to the macropad over raw USB via libusb (pyusb).
 
-Which HID interface accepts the config reports isn't documented, so like the vendor tool
-we probe: the first packet is tried on each interface (most likely first) and the rest of
-the packets go to whichever accepted it.
+The config channel isn't a HID report: the pad has a HID-class interface (interface 1 on
+real hardware) whose only endpoint is an interrupt OUT pipe (0x02). macOS binds no HID
+driver to it, so HID APIs can't see it; libusb writes to it directly, no permissions needed.
 """
 
-import hid
+import usb.core as usb_core
+import usb.util as usb_util
+from usb.core import USBError
 
 VENDOR_ID = 0x1189
 PRODUCT_ID = 0x8890
+TIMEOUT_MS = 1000
+
+_INTERRUPT = 0x03
 
 
 class DeviceNotFound(RuntimeError):
@@ -21,69 +26,85 @@ class WriteFailed(RuntimeError):
         self.attempts = attempts or []
 
 
-def interfaces(hid_module=hid) -> list[dict]:
-    """The macropad's HID interfaces, one per path, most likely config interface first."""
-    unique: dict[bytes, dict] = {}
-    for info in sorted(hid_module.enumerate(VENDOR_ID, PRODUCT_ID), key=_priority):
-        unique.setdefault(info["path"], info)
-    return list(unique.values())
+class LibUsb:
+    """The real backend."""
+
+    def find(self):
+        import libusb_package
+
+        return usb_core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID,
+                             backend=libusb_package.get_libusb1_backend())
+
+    def dispose(self, device):
+        usb_util.dispose_resources(device)
 
 
-def send(packets: list[bytes], hid_module=hid) -> dict:
-    """Write `packets` in order to the first interface that accepts them; returns its info."""
-    candidates = interfaces(hid_module)
-    if not candidates:
+def interfaces(usb=None) -> list[dict]:
+    """Every USB interface of the pad with its endpoints; the config one is marked."""
+    usb = usb or LibUsb()
+    dev = usb.find()
+    if dev is None:
+        return []
+    try:
+        config = _config_endpoint(dev)
+        return [
+            {
+                "interface_number": intf.bInterfaceNumber,
+                "class": intf.bInterfaceClass,
+                "config": config is not None and intf.bInterfaceNumber == config[0],
+                "endpoints": [
+                    {
+                        "address": f"0x{ep.bEndpointAddress:02x}",
+                        "direction": "in" if ep.bEndpointAddress & 0x80 else "out",
+                        "type": ["control", "isochronous", "bulk", "interrupt"][ep.bmAttributes & 0x03],
+                    }
+                    for ep in intf
+                ],
+            }
+            for intf in dev.get_active_configuration()
+        ]
+    finally:
+        usb.dispose(dev)
+
+
+def send(packets: list[bytes], usb=None) -> dict:
+    """Write `packets` in order to the pad's config endpoint; returns where they went."""
+    usb = usb or LibUsb()
+    dev = usb.find()
+    if dev is None:
         raise DeviceNotFound(
             f"no macropad found (USB {VENDOR_ID:04x}:{PRODUCT_ID:04x}); is it plugged in?"
         )
-
-    attempts = []
-    for info in candidates:
-        label = describe(info)
-        dev = hid_module.device()
-        try:
-            dev.open_path(info["path"])
-        except OSError as exc:
-            attempts.append(f"{label}: open failed ({exc})")
-            continue
-        try:
-            if not _write(dev, packets[0]):
-                attempts.append(f"{label}: write rejected ({dev.error()})")
-                continue
-            for number, packet in enumerate(packets[1:], start=2):
-                if not _write(dev, packet):
-                    raise WriteFailed(
-                        f"{label}: write failed on packet {number} of {len(packets)} "
-                        f"({dev.error()}); the slot may be half-programmed, retry the command",
-                        attempts,
-                    )
-            return info
-        finally:
-            dev.close()
-
-    raise WriteFailed("no HID interface of the macropad accepted the config report", attempts)
-
-
-def describe(info: dict) -> str:
-    return (
-        f"interface {info['interface_number']} "
-        f"(usage page 0x{info['usage_page']:04x}, usage 0x{info['usage']:02x})"
-    )
-
-
-def _write(dev, packet: bytes) -> bool:
     try:
-        return dev.write(packet) > 0
-    except OSError:
-        return False
+        config = _config_endpoint(dev)
+        if config is None:
+            raise WriteFailed("the pad has no interrupt OUT endpoint to send config to")
+        interface, endpoint = config
+        _detach_kernel_driver(dev, interface)
+        for number, packet in enumerate(packets, start=1):
+            where = f"endpoint 0x{endpoint:02x}: packet {number} of {len(packets)}"
+            try:
+                written = dev.write(endpoint, packet, timeout=TIMEOUT_MS)
+            except USBError as exc:
+                raise WriteFailed(f"{where} failed ({exc}); retry the command") from exc
+            if written != len(packet):
+                raise WriteFailed(f"{where} wrote {written} of {len(packet)} bytes; retry")
+        return {"interface_number": interface, "endpoint": endpoint}
+    finally:
+        usb.dispose(dev)
 
 
-def _priority(info: dict) -> int:
-    page, usage = info["usage_page"], info["usage"]
-    if page >= 0xFF00:
-        return 0  # vendor-defined: where config reports normally live
-    if (page, usage) == (0x01, 0x06):
-        return 3  # keyboard: macOS may require Input Monitoring permission to open it
-    if page == 0x01:
-        return 2
-    return 1
+def _config_endpoint(dev) -> tuple[int, int] | None:
+    for intf in dev.get_active_configuration():
+        for ep in intf:
+            if not ep.bEndpointAddress & 0x80 and ep.bmAttributes & 0x03 == _INTERRUPT:
+                return intf.bInterfaceNumber, ep.bEndpointAddress
+    return None
+
+
+def _detach_kernel_driver(dev, interface: int) -> None:
+    try:
+        if dev.is_kernel_driver_active(interface):
+            dev.detach_kernel_driver(interface)
+    except (NotImplementedError, USBError):
+        pass  # not supported on this platform, or nothing to detach

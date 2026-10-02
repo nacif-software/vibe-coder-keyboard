@@ -21,16 +21,20 @@ Python ≥ 3.11, managed with uv. `uv run pytest` runs everything with no hardwa
 | `src/macropad/actions.py` | Parse/format action strings (`cmd+shift+4`, `cmd+a, cmd+c`, `volume-up`) |
 | `src/macropad/protocol.py` | Pure functions: action + slot + layer → 64-byte HID reports |
 | `src/macropad/layout.py` | The layout YAML file, the only record of what the write-only device holds |
-| `src/macropad/device.py` | hidapi transport; probes which HID interface accepts the reports |
+| `src/macropad/device.py` | libusb (pyusb) transport; writes to the pad's interrupt OUT endpoint |
 | `src/macropad/cli.py` | argparse commands, `--json` output, exit codes |
 
 Conventions:
 - **Tests first.** Watch a new test fail before writing the code. Expected packet bytes are
   derived by hand from [`docs/protocol.md`](docs/protocol.md), never computed with the code under
   test.
-- **Only the USB boundary is faked.** `tests/fakes.py` must mirror the real `hid` module:
-  `open_path` raises `OSError`, `write` returns `-1` on failure, and `enumerate` returns all 11
-  fields. If the real API turns out to behave differently, fix the fake first.
+- **Only the USB boundary is faked.** `tests/fakes.py` must mirror the real pyusb API:
+  `get_active_configuration()` iterates interfaces, interfaces iterate endpoints
+  (`bEndpointAddress`, `bmAttributes`), and `write(endpoint, data, timeout)` returns the byte
+  count or raises `usb.core.USBError`. Its default interfaces are the real pad's (read from
+  hardware). If the real API turns out to behave differently, fix the fake first.
+- **Don't use HID APIs for the config channel.** It's a raw OUT endpoint that HID can't see
+  (see `docs/protocol.md`).
 - **The CLI contract is public API.** Every command supports `--json`. Errors go to stdout as
   `{"ok": false, "error": {...}}` when `--json` is set. Exit codes are 0/1/2/3. If you change the
   contract, update `--help`, `README.md` and `SKILL.md` together.

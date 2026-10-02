@@ -8,11 +8,22 @@ methods that matter are `FormMain.Download_Click`, `Send_SwLayer`, `Send_WriteFl
 
 ## Transport
 
-- USB `VID 0x1189`, `PID 0x8890`, HID output reports.
-- Report ID `0x03`. The vendor tool probes report IDs 3, 0 and 2, and uses the first one the
-  device accepts. Report ID 0 is an older firmware that has no layers; `macropad` doesn't support
-  it.
-- Each report is the report ID followed by the payload, zero-padded to 64 bytes.
+- USB `VID 0x1189`, `PID 0x8890`. The pad has four USB interfaces (confirmed on hardware):
+
+  | Interface | Endpoint | What it is |
+  |---|---|---|
+  | 0 | `0x81` IN | boot keyboard (report ID 1, key range `0x00`–`0x91`) |
+  | **1** | **`0x02` OUT, interrupt, 64 bytes** | **config channel** |
+  | 2 | `0x83` IN | keyboard (report ID 1) + consumer/media (report ID 2) |
+  | 3 | `0x82` IN | 3-button mouse |
+
+- The config channel is **not** a HID report. Interface 1 is HID class, but its only endpoint is
+  OUT, so macOS binds no HID driver to it and HID APIs (hidapi, IOHIDManager) can't see it.
+  `macropad` writes raw 64-byte packets to `0x02` with libusb, which needs no special permissions
+  on macOS. No HID descriptor declares report ID 3; the firmware just reads the endpoint.
+- Each packet starts with `0x03` (the vendor tool's "report ID", kept as the first byte), followed
+  by the payload, zero-padded to 64 bytes. The vendor tool also probes IDs 0 and 2 for older
+  firmware, which `macropad` doesn't support.
 
 ## Payloads
 
@@ -43,14 +54,21 @@ same limit.
   binding one empty keystroke (mods 0, code 0).
 - **Reading the configuration back.** The device has no read command.
 
-## To verify on real hardware
+## Verified on real hardware (2026-10-02)
 
-- [ ] Which HID interface accepts report 3 (see `macropad status`), and whether writes need a delay
-      between packets.
-- [ ] Physical position of key1–key6 (run `macropad identify`).
+- [x] Transport: interface 1, endpoint `0x02`, no delay needed between packets (36 packets in a
+      row for `identify` all landed).
+- [x] Physical layout: `key1`–`key3` top row left to right, `key4`–`key6` bottom row; knob turn
+      left = `knob-left`, press = `knob-press`, turn right = `knob-right`.
+- [x] Combos (`shift+1`, `cmd+a`), sequences with per-step modifiers (`shift+h, i`), the 5-step
+      maximum (`h, e, l, l, o`), mouse (`scroll-down`, `right-click`) and media keys
+      (`volume-up`, `volume-down`, `mute`).
+
+## Still to verify
+
 - [ ] That clearing with an empty keystroke really does nothing.
 - [ ] Whether sequences longer than 5 steps work (the firmware might accept them even though the
       vendor tool stops at 5).
-- [ ] F13–F24, `kp-enter`, `kp-equal`.
+- [ ] F13–F24, `kp-enter`, `kp-equal` (all within interface 0's declared key range `0x00`–`0x91`).
 - [ ] Whether the LED mode is global or per layer (it's currently always sent with layer 1).
 - [ ] How the pad switches between layers physically.

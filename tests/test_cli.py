@@ -3,7 +3,7 @@ import json
 import pytest
 import yaml
 
-from fakes import MACROPAD_INTERFACES, OTHER_KEYBOARD, FakeHid
+from fakes import FakeDevice, FakeUsb
 from macropad.cli import main
 
 
@@ -14,16 +14,17 @@ def layout_path(tmp_path):
 
 @pytest.fixture
 def fake():
-    return FakeHid(MACROPAD_INTERFACES)
+    return FakeUsb(FakeDevice())
 
 
 def run(argv, fake, layout_path):
-    return main([*argv, "--layout", str(layout_path)], hid_module=fake)
+    return main([*argv, "--layout", str(layout_path)], usb=fake)
 
 
 def sent_payloads(fake):
     """Report-id-stripped, zero-trimmed payloads the device received, in order."""
-    return [bytes(p[1:]).rstrip(b"\x00") for p in fake.written.get(b"vendor", [])]
+    assert all(endpoint == 0x02 for endpoint, _ in fake.device.written)
+    return [bytes(p[1:]).rstrip(b"\x00") for _, p in fake.device.written]
 
 
 def saved(layout_path):
@@ -58,7 +59,7 @@ def test_set_keeps_other_slots_in_the_layout(fake, layout_path):
 
 def test_invalid_action_sends_nothing_and_exits_1(fake, layout_path, capsys):
     assert run(["set", "key1", "cmd+pagedwn"], fake, layout_path) == 1
-    assert fake.opened == []
+    assert fake.device.written == []
     assert not layout_path.exists()
     assert "pagedown" in capsys.readouterr().err
 
@@ -66,24 +67,24 @@ def test_invalid_action_sends_nothing_and_exits_1(fake, layout_path, capsys):
 def test_sequence_over_the_limit_is_rejected(fake, layout_path, capsys):
     assert run(["set", "key1", "a, b, c, d, e, f"], fake, layout_path) == 1
     assert "5" in capsys.readouterr().err
-    assert fake.opened == []
+    assert fake.device.written == []
 
 
 def test_missing_device_exits_2_and_leaves_layout_untouched(layout_path, capsys):
-    assert run(["set", "key1", "a"], FakeHid([OTHER_KEYBOARD]), layout_path) == 2
+    assert run(["set", "key1", "a"], FakeUsb(None), layout_path) == 2
     assert not layout_path.exists()
     assert "plugged in" in capsys.readouterr().err
 
 
 def test_write_failure_exits_3_and_leaves_layout_untouched(layout_path):
-    fake = FakeHid(MACROPAD_INTERFACES, fail_after={b"vendor": 2})
+    fake = FakeUsb(FakeDevice(fail_on_packet=3))
     assert run(["set", "key1", "a"], fake, layout_path) == 3
     assert not layout_path.exists()
 
 
 def test_dry_run_prints_packets_without_touching_device_or_layout(fake, layout_path, capsys):
     assert run(["set", "key1", "ctrl+a", "--dry-run"], fake, layout_path) == 0
-    assert fake.opened == []
+    assert fake.device.written == []
     assert not layout_path.exists()
     assert "03 01 11 01 01 01 04" in capsys.readouterr().out
 
@@ -116,7 +117,7 @@ def test_unknown_slot_is_a_usage_error_exit_1(fake, layout_path, capsys):
     with pytest.raises(SystemExit) as exc:
         run(["set", "key7", "a"], fake, layout_path)
     assert exc.value.code == 1
-    assert fake.opened == []
+    assert fake.device.written == []
 
 
 # --- clear -----------------------------------------------------------------------------
@@ -124,7 +125,7 @@ def test_unknown_slot_is_a_usage_error_exit_1(fake, layout_path, capsys):
 def test_clear_blanks_the_slot_on_device_and_in_layout(fake, layout_path):
     run(["set", "key1", "a"], fake, layout_path)
     run(["set", "key2", "b"], fake, layout_path)
-    fake.written.clear()
+    fake.device.written.clear()
 
     assert run(["clear", "key1"], fake, layout_path) == 0
     assert sent_payloads(fake)[1:3] == [bytes([0x01, 0x11, 0x01]), bytes([0x01, 0x11, 0x01, 0x01])]
@@ -163,7 +164,7 @@ def test_apply_invalid_file_sends_nothing_and_lists_every_problem(fake, layout_p
     source = tmp_path / "bad.yaml"
     source.write_text("layers:\n  1:\n    key9: a\n    key1: cmd+nope\n")
     assert run(["apply", str(source), "--json"], fake, layout_path) == 1
-    assert fake.opened == []
+    assert fake.device.written == []
     out = json.loads(capsys.readouterr().out)
     assert out["error"]["type"] == "invalid_layout"
     assert len(out["error"]["details"]) == 2
@@ -216,11 +217,12 @@ def test_status_reports_connected_interfaces(fake, layout_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["connected"] is True
     assert len(out["interfaces"]) == 4
-    assert fake.written == {}
+    assert out["config_endpoint"] == {"interface_number": 1, "endpoint": "0x02"}
+    assert fake.device.written == []
 
 
 def test_status_when_disconnected_exits_2(layout_path, capsys):
-    assert run(["status", "--json"], FakeHid([]), layout_path) == 2
+    assert run(["status", "--json"], FakeUsb(None), layout_path) == 2
     assert json.loads(capsys.readouterr().out)["connected"] is False
 
 
@@ -237,5 +239,5 @@ def test_identify_maps_slots_to_digits_without_changing_layout(fake, layout_path
 def test_apply_with_nothing_recorded_refuses_instead_of_wiping_the_device(fake, layout_path,
                                                                            capsys):
     assert run(["apply"], fake, layout_path) == 1
-    assert fake.opened == []
+    assert fake.device.written == []
     assert "macropad set" in capsys.readouterr().err

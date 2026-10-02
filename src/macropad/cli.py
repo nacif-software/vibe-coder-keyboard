@@ -6,11 +6,9 @@ import os
 import sys
 from pathlib import Path
 
-import hid
-
 from macropad import keys
 from macropad.actions import MAX_STEPS, ActionError, format_action, parse_action
-from macropad.device import PRODUCT_ID, VENDOR_ID, DeviceNotFound, WriteFailed, describe
+from macropad.device import PRODUCT_ID, VENDOR_ID, DeviceNotFound, LibUsb, WriteFailed
 from macropad.device import interfaces as device_interfaces
 from macropad.device import send
 from macropad.layout import LayoutError, load, save
@@ -48,12 +46,12 @@ exit codes: 0 ok, 1 invalid input, 2 macropad not connected, 3 write failed
 """
 
 
-def main(argv=None, hid_module=None) -> int:
-    hid_module = hid_module or hid
+def main(argv=None, usb=None) -> int:
+    usb = usb or LibUsb()
     args = _build_parser().parse_args(argv)
     out = _Output(args.json)
     try:
-        return args.handler(args, hid_module, out)
+        return args.handler(args, usb, out)
     except ActionError as exc:
         return out.error("invalid_action", str(exc), EXIT_INVALID, suggestions=exc.suggestions)
     except LayoutError as exc:
@@ -67,35 +65,35 @@ def main(argv=None, hid_module=None) -> int:
 
 # --- commands -------------------------------------------------------------------------------
 
-def _cmd_set(args, hid_module, out):
+def _cmd_set(args, usb, out):
     action = parse_action(args.action)
     layout = load(args.layout)
     packets = bind_packets(args.slot, args.layer, action)
     if args.dry_run:
         return out.packets(packets)
-    info = send(packets, hid_module)
+    info = send(packets, usb)
     layout.set_slot(args.layer, args.slot, args.action)
     save(layout, args.layout)
     canonical = format_action(action)
     return out.ok(
-        {"layer": args.layer, "slot": args.slot, "action": canonical, "interface": describe(info)},
+        {"layer": args.layer, "slot": args.slot, "action": canonical, "endpoint": f"0x{info['endpoint']:02x}"},
         f"layer {args.layer} {args.slot} = {canonical}",
     )
 
 
-def _cmd_clear(args, hid_module, out):
+def _cmd_clear(args, usb, out):
     layout = load(args.layout)
     packets = bind_packets(args.slot, args.layer, None)
     if args.dry_run:
         return out.packets(packets)
-    send(packets, hid_module)
+    send(packets, usb)
     layout.clear_slot(args.layer, args.slot)
     save(layout, args.layout)
     return out.ok({"layer": args.layer, "slot": args.slot, "action": None},
                   f"layer {args.layer} {args.slot} cleared")
 
 
-def _cmd_apply(args, hid_module, out):
+def _cmd_apply(args, usb, out):
     source = Path(args.file) if args.file else args.layout
     if not source.exists():
         hint = "" if args.file else "; record one with `macropad set` or pass a file"
@@ -110,7 +108,7 @@ def _cmd_apply(args, hid_module, out):
     if args.dry_run:
         return out.packets(packets)
 
-    send(packets, hid_module)
+    send(packets, usb)
     if source.resolve() != args.layout.resolve():
         save(layout, args.layout)
     programmed = sum(action is not None for action in bindings.values())
@@ -122,19 +120,19 @@ def _cmd_apply(args, hid_module, out):
     )
 
 
-def _cmd_led(args, hid_module, out):
+def _cmd_led(args, usb, out):
     layout = load(args.layout)
     packets = led_packets(args.mode)
     if args.dry_run:
         return out.packets(packets)
-    send(packets, hid_module)
+    send(packets, usb)
     layout.led = args.mode
     save(layout, args.layout)
     return out.ok({"led": args.mode, "description": LED_DESCRIPTIONS[args.mode]},
                   f"LED mode {args.mode}: {LED_DESCRIPTIONS[args.mode]}")
 
 
-def _cmd_show(args, hid_module, out):
+def _cmd_show(args, usb, out):
     layout = load(args.layout)
     layers = [args.layer] if args.layer else list(LAYERS)
     table = {
@@ -153,7 +151,7 @@ def _cmd_show(args, hid_module, out):
                   "\n".join(lines))
 
 
-def _cmd_names(args, hid_module, out):
+def _cmd_names(args, usb, out):
     reference = {
         "slots": list(SLOT_IDS),
         "layers": list(LAYERS),
@@ -184,34 +182,37 @@ def _cmd_names(args, hid_module, out):
     return out.ok(reference, text)
 
 
-def _cmd_status(args, hid_module, out):
-    found = [
-        {
-            "interface_number": info["interface_number"],
-            "usage_page": f"0x{info['usage_page']:04x}",
-            "usage": f"0x{info['usage']:02x}",
-            "path": info["path"].decode(errors="replace"),
-        }
-        for info in device_interfaces(hid_module)
-    ]
+def _cmd_status(args, usb, out):
+    found = device_interfaces(usb)
     usb_id = f"{VENDOR_ID:04x}:{PRODUCT_ID:04x}"
     if not found:
         return out.error("device_not_found", f"macropad {usb_id} not connected", EXIT_NO_DEVICE,
                          extra={"connected": False, "layout_file": str(args.layout)})
-    lines = [f"macropad {usb_id} connected, {len(found)} HID interface(s):"]
-    lines += [f"  interface {i['interface_number']}: usage page {i['usage_page']}, "
-              f"usage {i['usage']}" for i in found]
+    config = next((i for i in found if i["config"]), None)
+    config_endpoint = None
+    if config:
+        out_ep = next(e for e in config["endpoints"] if e["direction"] == "out")
+        config_endpoint = {"interface_number": config["interface_number"],
+                           "endpoint": out_ep["address"]}
+    lines = [f"macropad {usb_id} connected, {len(found)} USB interface(s):"]
+    for i in found:
+        eps = ", ".join(f"{e['address']} {e['direction']} {e['type']}" for e in i["endpoints"])
+        lines.append(f"  interface {i['interface_number']}: {eps}"
+                     + ("   <- config channel" if i["config"] else ""))
+    if config_endpoint is None:
+        lines.append("warning: no interrupt OUT endpoint found; writes will fail")
     lines.append(f"layout file: {args.layout}")
     return out.ok({"connected": True, "usb_id": usb_id, "interfaces": found,
-                   "layout_file": str(args.layout)}, "\n".join(lines))
+                   "config_endpoint": config_endpoint, "layout_file": str(args.layout)},
+                  "\n".join(lines))
 
 
-def _cmd_identify(args, hid_module, out):
+def _cmd_identify(args, usb, out):
     packets = [p for slot, digit in IDENTIFY_DIGITS.items()
                for p in bind_packets(slot, 1, parse_action(digit))]
     if args.dry_run:
         return out.packets(packets)
-    send(packets, hid_module)
+    send(packets, usb)
     text = (
         "layer 1 is now in identify mode: open a text field and press each key.\n"
         "the digit it types is its slot: 1-6 = key1-key6, knob turn left = 7, "

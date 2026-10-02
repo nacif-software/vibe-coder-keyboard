@@ -1,67 +1,67 @@
 import pytest
 
-from fakes import MACROPAD_INTERFACES, OTHER_KEYBOARD, FakeHid, hid_info
+from fakes import FakeDevice, FakeEndpoint, FakeInterface, FakeUsb
 from macropad.device import DeviceNotFound, WriteFailed, interfaces, send
 
 PACKETS = [b"\x03\xa1\x01", b"\x03\x01\x11", b"\x03\xaa\xaa"]
 
 
 def test_no_macropad_connected_raises_device_not_found():
-    fake = FakeHid([OTHER_KEYBOARD])
-    with pytest.raises(DeviceNotFound):
-        send(PACKETS, hid_module=fake)
-    assert fake.opened == []
+    with pytest.raises(DeviceNotFound, match="plugged in"):
+        send(PACKETS, usb=FakeUsb(None))
 
 
-def test_packets_go_to_the_vendor_defined_interface_first():
-    fake = FakeHid([OTHER_KEYBOARD, *MACROPAD_INTERFACES])
-    used = send(PACKETS, hid_module=fake)
-    assert used["path"] == b"vendor"
-    assert fake.written == {b"vendor": PACKETS}
-    assert fake.closed == [b"vendor"]
+def test_packets_go_in_order_to_the_interrupt_out_endpoint():
+    dev = FakeDevice()
+    usb = FakeUsb(dev)
+    used = send(PACKETS, usb=usb)
+    assert dev.written == [(0x02, p) for p in PACKETS]
+    assert used == {"interface_number": 1, "endpoint": 0x02}
+    assert usb.disposed == [dev]
 
 
-def test_falls_back_when_an_interface_rejects_the_first_packet():
-    fake = FakeHid(MACROPAD_INTERFACES, rejects_writes={b"vendor"})
-    used = send(PACKETS, hid_module=fake)
-    assert used["path"] == b"consumer"
-    assert fake.written == {b"consumer": PACKETS}
-    assert b"vendor" in fake.closed
+def test_out_endpoint_is_found_wherever_it_is():
+    dev = FakeDevice(interfaces=[
+        FakeInterface(0, [FakeEndpoint(0x81)]),
+        FakeInterface(2, [FakeEndpoint(0x84), FakeEndpoint(0x04)]),
+    ])
+    assert send(PACKETS, usb=FakeUsb(dev)) == {"interface_number": 2, "endpoint": 0x04}
 
 
-def test_falls_back_when_an_interface_cannot_be_opened():
-    fake = FakeHid(MACROPAD_INTERFACES, unopenable={b"vendor", b"consumer"})
-    used = send(PACKETS, hid_module=fake)
-    assert used["path"] == b"mouse"
+def test_bulk_out_endpoints_are_not_the_config_channel():
+    dev = FakeDevice(interfaces=[FakeInterface(1, [FakeEndpoint(0x02, attributes=0x02)])])
+    with pytest.raises(WriteFailed, match="OUT endpoint"):
+        send(PACKETS, usb=FakeUsb(dev))
+    assert dev.written == []
 
 
-def test_keyboard_interface_is_the_last_resort():
-    fake = FakeHid(MACROPAD_INTERFACES)
-    assert [info["path"] for info in interfaces(fake)] == [
-        b"vendor", b"consumer", b"mouse", b"kbd",
-    ]
+def test_kernel_driver_is_detached_from_the_config_interface_only():
+    dev = FakeDevice(kernel_driver_on={0, 1})
+    send(PACKETS, usb=FakeUsb(dev))
+    assert dev.detached == [1]
 
 
-def test_collections_sharing_a_path_are_tried_once():
-    shared = [hid_info(b"if1", 0x0C, 0x01, 1), hid_info(b"if1", 0x01, 0x02, 1)]
-    fake = FakeHid(shared, rejects_writes={b"if1"})
-    with pytest.raises(WriteFailed):
-        send(PACKETS, hid_module=fake)
-    assert fake.opened == [b"if1"]
+def test_usb_error_mid_stream_reports_the_failing_packet_and_still_disposes():
+    dev = FakeDevice(fail_on_packet=2)
+    usb = FakeUsb(dev)
+    with pytest.raises(WriteFailed, match="packet 2 of 3"):
+        send(PACKETS, usb=usb)
+    assert usb.disposed == [dev]
 
 
-def test_every_interface_refusing_raises_write_failed_with_reasons():
-    fake = FakeHid(MACROPAD_INTERFACES, rejects_writes={b"vendor", b"consumer", b"mouse"},
-                   unopenable={b"kbd"})
-    with pytest.raises(WriteFailed) as exc:
-        send(PACKETS, hid_module=fake)
-    assert len(exc.value.attempts) == 4
-    assert fake.written == {}
+def test_short_write_is_a_failure():
+    with pytest.raises(WriteFailed, match="packet 3 of 3"):
+        send(PACKETS, usb=FakeUsb(FakeDevice(short_on_packet=3)))
 
 
-def test_failure_after_the_first_packet_does_not_switch_interfaces():
-    fake = FakeHid(MACROPAD_INTERFACES, fail_after={b"vendor": 1})
-    with pytest.raises(WriteFailed, match="2 of 3"):
-        send(PACKETS, hid_module=fake)
-    assert list(fake.written) == [b"vendor"]
-    assert fake.closed == [b"vendor"]
+def test_interfaces_describe_endpoints_and_mark_the_config_one():
+    found = interfaces(usb=FakeUsb(FakeDevice()))
+    assert [i["interface_number"] for i in found] == [0, 1, 2, 3]
+    config = [i for i in found if i["config"]]
+    assert [i["interface_number"] for i in config] == [1]
+    assert config[0]["endpoints"] == [{"address": "0x02", "direction": "out", "type": "interrupt"}]
+    assert found[0]["endpoints"][0]["direction"] == "in"
+
+
+def test_interfaces_is_empty_when_disconnected():
+    assert interfaces(usb=FakeUsb(None)) == []
