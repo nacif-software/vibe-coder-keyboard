@@ -52,3 +52,12 @@ to plug it in · `3` write failed: retry once, then report `error.details`.
 
 `macropad apply FILE` replaces the whole layout and clears every slot the file doesn't map. Only
 use it when the user wants a full layout change, and run `macropad show` first.
+
+## Ready-made layout for Claude Code
+
+The repo ships `layouts/nacifs-vibe-coder-keyboard.yaml`: knob = model picker + effort, knob
+press = enter, key3/key6 = up/down, key1 = esc, key2/key5 = page up/down, key4 = space
+(push-to-talk). When the user asks for "the vibe coder layout" or to "set the pad up for Claude
+Code", apply it. Read `layouts/nacifs-vibe-coder-keyboard.md` first: it explains each key and
+flags the two slots that may need adapting (key4 for their dictation tool, `opt+p` if they
+rebound the model picker). It needs *Use Option as Meta key* on in Terminal.app.

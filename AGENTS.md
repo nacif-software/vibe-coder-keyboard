@@ -10,6 +10,9 @@ Follow [`skills/macropad/SKILL.md`](skills/macropad/SKILL.md). The short version
 - Stop at the first exit code `2` (pad not connected).
 - Never quietly substitute an action the device can't do. Offer the closest option and let the
   user choose.
+- If the user asks for "the vibe coder layout" or to set the pad up for Claude Code, apply
+  [`layouts/nacifs-vibe-coder-keyboard.yaml`](layouts/nacifs-vibe-coder-keyboard.yaml). The
+  [guide](layouts/nacifs-vibe-coder-keyboard.md) explains every key and what may need adapting.
 
 ## 2. Working on the code
 

@@ -121,6 +121,18 @@ layers:
 If you program the pad from the Windows app, this file goes stale. Run `macropad apply` to make the
 pad match the file again.
 
+## Ready-made layout: Nacif's Vibe Coder Keyboard Keys
+
+[`layouts/nacifs-vibe-coder-keyboard.md`](layouts/nacifs-vibe-coder-keyboard.md) is the layout
+this pad was built for: driving Claude Code with dictation and these nine controls. The knob
+opens the model picker and sets the effort level, two keys pick the model, the knob press
+confirms, and the others scroll, cancel and push-to-talk. The guide explains each choice and the
+one terminal setting it needs.
+
+```sh
+macropad apply layouts/nacifs-vibe-coder-keyboard.yaml
+```
+
 ## Using it from an agent
 
 [`skills/macropad/SKILL.md`](skills/macropad/SKILL.md) teaches an agent the workflow: read the

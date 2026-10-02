@@ -1,0 +1,14 @@
+# Nacif's Vibe Coder Keyboard Keys — drive Claude Code with dictation + this pad.
+# See layouts/nacifs-vibe-coder-keyboard.md for what each key does and why.
+# Apply with: macropad apply layouts/nacifs-vibe-coder-keyboard.yaml
+layers:
+  1:
+    key1: esc
+    key2: pageup
+    key3: up
+    key4: space
+    key5: pagedown
+    key6: down
+    knob-left: opt+p, left
+    knob-press: enter
+    knob-right: opt+p, right
