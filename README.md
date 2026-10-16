@@ -80,6 +80,11 @@ anything.
 **Slots:** `key1` … `key6`, `knob-left`, `knob-press`, `knob-right`. **Layers:** `1` `2` `3`
 (default `1`).
 
+> **Layers may not be separate.** At least one pad ignores the layer: each slot keeps the last
+> thing written to it, on any layer. `macropad apply` sends clears first and layer 1 last, so a
+> layer 1 layout comes out right. But `set` or `clear` with `--layer 2` or `3` overwrites the same
+> slot on layer 1. See [`docs/protocol.md`](docs/protocol.md).
+
 **Exit codes:** `0` ok · `1` invalid input · `2` pad not connected · `3` USB write failed.
 
 ## Action syntax

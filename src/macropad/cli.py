@@ -101,8 +101,10 @@ def _cmd_apply(args, usb, out):
     layout = load(source)
 
     bindings = layout.bindings()
-    packets = [p for (layer, slot), action in bindings.items()
-               for p in bind_packets(slot, layer, action)]
+    # The pad ignores the layer and keeps the last write to each slot (docs/protocol.md), so
+    # clears go first and layer 1 goes last.
+    order = sorted(bindings.items(), key=lambda item: (item[1] is not None, -item[0][0]))
+    packets = [p for (layer, slot), action in order for p in bind_packets(slot, layer, action)]
     if layout.led is not None:
         packets += led_packets(layout.led)
     if args.dry_run:

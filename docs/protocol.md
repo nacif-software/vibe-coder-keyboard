@@ -64,6 +64,15 @@ same limit.
       maximum (`h, e, l, l, o`), mouse (`scroll-down`, `right-click`) and media keys
       (`volume-up`, `volume-down`, `mute`).
 
+## Tried on real hardware (2026-10-16)
+
+- [x] LED modes beyond 0–2: modes `3`, `4` and `5` turn the backlight off, idle and on key
+      presses alike. No hidden effects there; `macropad led` stays limited to 0–2.
+- [x] **On this pad the layer is ignored: the last write to a slot wins, whatever its layer.**
+      Writing `key1` = `q` / `w` / `e` to layers 1 / 2 / 3 (in that order) and `x` to `key2`–`key6`
+      on layer 1 made the pad type `e` then `x` ×5. So `macropad apply`, which writes layer 1 and
+      then cleared layers 2 and 3, left every key blank. `apply` now sends clears first and layer 1 last.
+
 ## Still to verify
 
 - [ ] That clearing with an empty keystroke really does nothing.
