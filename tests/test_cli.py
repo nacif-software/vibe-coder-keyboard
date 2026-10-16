@@ -153,6 +153,21 @@ def test_apply_makes_the_device_match_the_file(fake, layout_path, tmp_path, caps
     assert out["cleared"] == 26
 
 
+def test_apply_writes_clears_first_and_layer_1_last(fake, layout_path, tmp_path):
+    # Real hardware ignores the layer: the last write to a slot wins (docs/protocol.md). Clearing
+    # layers 2-3 after programming layer 1 used to leave every key blank.
+    source = tmp_path / "mine.yaml"
+    source.write_text("layers:\n  1:\n    key1: esc\n  2:\n    key1: a\n")
+    assert run(["apply", str(source)], fake, layout_path) == 0
+    # binding packets for key1 start with its slot ID; no other packet starts with 0x01
+    key1 = [p for p in sent_payloads(fake) if p[0] == 0x01]
+    assert key1 == [
+        bytes([0x01, 0x31, 0x01]), bytes([0x01, 0x31, 0x01, 0x01]),                    # layer 3 cleared
+        bytes([0x01, 0x21, 0x01]), bytes([0x01, 0x21, 0x01, 0x01, 0x00, 0x04]),        # layer 2: a
+        bytes([0x01, 0x11, 0x01]), bytes([0x01, 0x11, 0x01, 0x01, 0x00, 0x29]),        # layer 1: esc
+    ]
+
+
 def test_apply_without_file_uses_the_recorded_layout(fake, layout_path):
     layout_path.write_text("layers:\n  1:\n    key5: esc\n")
     assert run(["apply"], fake, layout_path) == 0

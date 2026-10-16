@@ -21,6 +21,9 @@ layout file is the only record of what each key does.
 ## Slots and syntax
 
 Slots: `key1`…`key6`, `knob-left`, `knob-press`, `knob-right`. Layers 1–3 (default 1).
+Some pads ignore the layer and keep the last write to each slot, so `set`/`clear` with
+`--layer 2` or `3` overwrites that slot on layer 1. Don't write to layers 2–3 unless the user asks,
+and warn them first.
 If the user refers to keys by physical position and you don't know the mapping, ask them to
 run `macropad identify` (the digit each key types is its slot number), then `macropad apply`
 to restore their layout.
